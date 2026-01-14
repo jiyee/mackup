@@ -6,8 +6,8 @@ Copyright (C) 2013-2025 Laurent Raufaste <http://glop.org/>
 Usage:
   mackup [options] list
   mackup [options] show <application>
-  mackup [options] backup
-  mackup [options] restore
+  mackup [options] backup [--] [<application> ...]
+  mackup [options] restore [--] [<application> ...]
   mackup [options] link install
   mackup [options] link
   mackup [options] link uninstall
@@ -82,7 +82,7 @@ def main() -> None:
         utils.FORCE_YES = True
 
     # If we want to answer mackup with "no" for each question
-    if args['--force-no']:
+    if args["--force-no"]:
         utils.FORCE_NO = True
 
     # Allow mackup to be run as root
@@ -123,9 +123,17 @@ def main() -> None:
     elif args["backup"]:
         mckp.check_for_usable_backup_env()
 
-        # Create a backup of the files of each application
-        for app_name in sorted(mckp.get_apps_to_backup()):
-            app: ApplicationProfile = ApplicationProfile(mckp, app_db.get_files(app_name), dry_run, verbose)
+        applications = sorted(mckp.get_apps_to_backup())
+
+        # To allow for specific applications to be backed up, we replace the full list with only the valid ones from the command line
+        if args["<application>"]:
+            applications = list(set(args["<application>"]) & set(applications))
+
+        # Backup each application
+        for app_name in applications:
+            app: ApplicationProfile = ApplicationProfile(
+                mckp, app_db.get_files(app_name), dry_run, verbose
+            )
             printAppHeader(app_name)
             app.copy_files_to_mackup_folder()
 
@@ -134,7 +142,12 @@ def main() -> None:
         mckp.check_for_usable_backup_env()
 
         # Recover a backup of the files of each application
-        for app_name in sorted(mckp.get_apps_to_backup()):
+        app_names = mckp.get_apps_to_backup()
+        # To allow for specific applications to be restored up, we replace the full list with only the valid ones from the command line
+        if args["<application>"]:
+            app_names = set(args["<application>"]) & app_names
+
+        for app_name in app_names:
             app = ApplicationProfile(mckp, app_db.get_files(app_name), dry_run, verbose)
             printAppHeader(app_name)
             app.copy_files_from_mackup_folder()
