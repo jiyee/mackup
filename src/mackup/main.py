@@ -26,7 +26,7 @@ Options:
   -c --config-file=<path>   Specify custom config file path.
   --all                     Run a command across all managed applications.
   --backup-root=<path>      Override the backup root used by `bcomp`.
-  --status=<status>         Filter `diff` rows by status.
+  --status=<status>         Filter `diff` rows by status. Defaults to `different`.
   --version                 Show version.
 
 Modes of action:
@@ -36,6 +36,7 @@ Modes of action:
  - mackup backup: copy local config files in the configured remote folder.
  - mackup restore: copy config files from the configured remote folder locally.
  - mackup diff: compare local config files with the configured remote folder.
+   Defaults to rows with `different` status.
  - mackup link install: moves local config files in remote folder, and links them.
  - mackup link: links local config files from the remote folder.
  - mackup link uninstall: removes the links and copy config files from the remote folder locally.
@@ -225,15 +226,14 @@ def main() -> None:
         app_names = sorted(mckp.get_apps_to_backup())
         if args["<application>"]:
             app_names = sorted(set(args["<application>"]) & set(app_names))
-        status_filter: Optional[str] = args.get("--status")
+        status_filter: Optional[str] = args.get("--status") or "different"
 
         rows: List[Dict[str, str]] = []
         for app_name in app_names:
             app = ApplicationProfile(mckp, app_db.get_files(app_name), dry_run, verbose)
             rows.extend(app.get_diff_rows(app_name))
 
-        if status_filter:
-            rows = [row for row in rows if row["Status"] == status_filter]
+        rows = [row for row in rows if row["Status"] == status_filter]
 
         if rows:
             print(
@@ -243,14 +243,11 @@ def main() -> None:
                 )
             )
         else:
-            if status_filter:
-                print(
-                    "No managed configuration paths found for status: {}.".format(
-                        status_filter
-                    )
+            print(
+                "No managed configuration paths found for status: {}.".format(
+                    status_filter
                 )
-            else:
-                print("No managed configuration paths found.")
+            )
 
     # mackup link install
     elif args["link"] and args["install"]:

@@ -291,11 +291,11 @@ class TestCLI(unittest.TestCase):
         with open(test_file_in_folder, "r") as f:
             self.assertEqual(f.read(), "folder_config=value\n")
 
-    def test_diff_reports_identical_file(self):
-        """Test that diff reports identical files when local and backup match."""
+    def test_diff_reports_identical_file_when_requested(self):
+        """Test that diff can report identical files when filtered explicitly."""
         self.run_cli("backup")
 
-        output = self.run_cli("diff")
+        output = self.run_cli("diff", "--status=identical")
 
         self.assertIn("Application", output)
         self.assertIn("Path", output)
@@ -316,22 +316,50 @@ class TestCLI(unittest.TestCase):
         self.assertIn(self.test_file_name, output)
         self.assertIn("different", output)
 
-    def test_diff_reports_missing_local_file(self):
-        """Test that diff reports missing_local when the local file is gone."""
+    def test_diff_defaults_to_different_status(self):
+        """Test that diff shows only different rows by default."""
         self.run_cli("backup")
-        os.remove(self.test_file_path)
+
+        extra_file_name = ".extra"
+        extra_file_path = os.path.join(self.test_home, extra_file_name)
+        with open(extra_file_path, "w") as f:
+            f.write("extra=value\n")
+
+        with open(self.custom_app_config, "w") as f:
+            f.write("[application]\n")
+            f.write(f"name = {self.test_app_name}\n")
+            f.write("\n")
+            f.write("[configuration_files]\n")
+            f.write(f"{self.test_file_name}\n")
+            f.write(f"{extra_file_name}\n")
+
+        with open(self.test_file_path, "w") as f:
+            f.write("test_config=modified\n")
 
         output = self.run_cli("diff")
 
         self.assertIn(self.test_file_name, output)
+        self.assertIn("different", output)
+        self.assertNotIn(extra_file_name, output)
+        self.assertNotIn("missing_backup", output)
+        self.assertNotIn("identical", output)
+
+    def test_diff_reports_missing_local_file_when_requested(self):
+        """Test that diff can report missing_local when filtered explicitly."""
+        self.run_cli("backup")
+        os.remove(self.test_file_path)
+
+        output = self.run_cli("diff", "--status=missing_local")
+
+        self.assertIn(self.test_file_name, output)
         self.assertIn("missing_local", output)
 
-    def test_diff_reports_missing_backup_file(self):
-        """Test that diff reports missing_backup when backup file is gone."""
+    def test_diff_reports_missing_backup_file_when_requested(self):
+        """Test that diff can report missing_backup when filtered explicitly."""
         self.run_cli("backup")
         os.remove(os.path.join(self.mackup_folder, self.test_file_name))
 
-        output = self.run_cli("diff")
+        output = self.run_cli("diff", "--status=missing_backup")
 
         self.assertIn(self.test_file_name, output)
         self.assertIn("missing_backup", output)

@@ -82,7 +82,8 @@ Copy config files from the Mackup folder to your home folder.
 `mackup diff`
 
 Compare your local config files with the Mackup folder and print the
-differences as a table.
+paths with `different` status as a table by default. You can combine it with
+`--status=<status>` to inspect another status.
 
 `mackup bcomp <application>`
 
