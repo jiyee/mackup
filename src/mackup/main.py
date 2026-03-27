@@ -6,6 +6,8 @@ Copyright (C) 2013-2025 Laurent Raufaste <http://glop.org/>
 Usage:
   mackup [options] list
   mackup [options] show <application>
+  mackup [options] bcomp <application> [--backup-root=<path>]
+  mackup [options] bcomp --all [--status=<status>] [--backup-root=<path>]
   mackup [options] backup [--] [<application> ...]
   mackup [options] restore [--] [<application> ...]
   mackup [options] diff [--status=<status>] [--] [<application> ...]
@@ -22,12 +24,15 @@ Options:
   -n --dry-run              Show steps without executing.
   -v --verbose              Show additional details.
   -c --config-file=<path>   Specify custom config file path.
+  --all                     Run a command across all managed applications.
+  --backup-root=<path>      Override the backup root used by `bcomp`.
   --status=<status>         Filter `diff` rows by status.
   --version                 Show version.
 
 Modes of action:
  - mackup list: display a list of all supported applications.
  - mackup show: display the details for a supported application.
+ - mackup bcomp: launch `bcomp` for one application or one batch diff view.
  - mackup backup: copy local config files in the configured remote folder.
  - mackup restore: copy config files from the configured remote folder locally.
  - mackup diff: compare local config files with the configured remote folder.
@@ -43,6 +48,7 @@ See https://github.com/lra/mackup/tree/master/doc for more information.
 
 """
 
+import os
 from docopt import docopt
 from .appsdb import ApplicationsDatabase
 from .application import ApplicationProfile
@@ -65,6 +71,15 @@ def header(text: str) -> str:
 
 def bold(text: str) -> str:
     return ColorFormatCodes.BOLD + text + ColorFormatCodes.NORMAL
+
+
+def single_application_arg(value: Any) -> str:
+    """Normalize a single application argument from docopt."""
+    if isinstance(value, list):
+        if not value:
+            raise ValueError("Expected one application argument.")
+        return str(value[0])
+    return str(value)
 
 
 def main() -> None:
@@ -112,7 +127,7 @@ def main() -> None:
     # mackup show <application>
     elif args["show"]:
         mckp.check_for_usable_environment()
-        requested_app_name: str = args["<application>"]
+        requested_app_name = single_application_arg(args["<application>"])
 
         # Make sure the app exists
         if requested_app_name not in app_db.get_app_names():
@@ -121,6 +136,54 @@ def main() -> None:
         print("Configuration files:")
         for file in app_db.get_files(requested_app_name):
             print(" - {}".format(file))
+
+    # mackup bcomp <application>
+    elif args["bcomp"]:
+        mckp.check_for_usable_environment()
+        backup_root = args.get("--backup-root")
+
+        if args["--all"]:
+            status_filter = args.get("--status") or "different"
+            resolved_backup_root = utils.resolve_backup_root(
+                mckp.mackup_folder, backup_root
+            )
+
+            rows: List[Dict[str, str]] = []
+            for app_name in sorted(mckp.get_apps_to_backup()):
+                app = ApplicationProfile(
+                    mckp, app_db.get_files(app_name), dry_run, verbose
+                )
+                rows.extend(app.get_diff_rows(app_name, backup_root))
+
+            rows = [row for row in rows if row["Status"] == status_filter]
+
+            if rows:
+                utils.run_bcomp_on_rows(
+                    rows,
+                    os.environ["HOME"],
+                    resolved_backup_root,
+                    dry_run,
+                    verbose,
+                )
+            else:
+                print(
+                    "No managed configuration paths found for status: {}.".format(
+                        status_filter
+                    )
+                )
+            mckp.clean_temp_folder()
+            return
+
+        requested_app_name = single_application_arg(args["<application>"])
+
+        if requested_app_name not in app_db.get_app_names():
+            sys.exit("Unsupported application: {}".format(requested_app_name))
+
+        app = ApplicationProfile(
+            mckp, app_db.get_files(requested_app_name), dry_run, verbose
+        )
+        printAppHeader(requested_app_name)
+        app.bcomp(backup_root)
 
     # mackup backup
     elif args["backup"]:

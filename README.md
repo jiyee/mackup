@@ -84,6 +84,17 @@ Copy config files from the Mackup folder to your home folder.
 Compare your local config files with the Mackup folder and print the
 differences as a table.
 
+`mackup bcomp <application>`
+
+Launch `bcomp` for each managed path in the selected application, using the
+configured Mackup backup folder by default.
+
+`mackup bcomp --all`
+
+Open one read-only Beyond Compare session for all managed paths with
+`different` status. You can combine it with `--status=<status>` to change the
+selection.
+
 `mackup link install`
 
 Move your local config files into the Mackup folder,

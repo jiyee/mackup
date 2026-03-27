@@ -9,6 +9,7 @@ import stat
 import subprocess
 import sys
 import sqlite3
+import tempfile
 from typing import Dict, List, NoReturn, Optional, Sequence
 
 from . import constants
@@ -391,6 +392,17 @@ def detect_path_type(path: str) -> str:
     return "missing"
 
 
+def normalize_managed_path(path: str) -> str:
+    """
+    Normalize a managed relative path before filesystem operations.
+
+    Directory entries in app configs may end with a trailing slash. Strip it so
+    joins, symlink creation, and staged comparisons operate on the real path.
+    """
+    normalized = path.rstrip("/\\")
+    return normalized or path
+
+
 def files_are_identical(left: str, right: str) -> bool:
     """
     Compare two files by content.
@@ -508,3 +520,119 @@ def render_table(headers: Sequence[str], rows: Sequence[Dict[str, str]]) -> str:
     body = [render_row(row) for row in string_rows]
 
     return "\n".join([header_row, separator, *body])
+
+
+def resolve_backup_root(default_root: str, override_root: Optional[str] = None) -> str:
+    """
+    Resolve the backup root used for comparisons and bcomp.
+
+    Returns:
+        str
+    """
+    resolved_root = override_root or default_root
+    resolved_root = os.path.expanduser(resolved_root)
+    if not os.path.isabs(resolved_root):
+        resolved_root = os.path.join(os.environ["HOME"], resolved_root)
+    return resolved_root
+
+
+def run_bcomp_on_rows(
+    rows: Sequence[Dict[str, str]],
+    local_root: str,
+    backup_root: str,
+    dry_run: bool,
+    verbose: bool,
+) -> None:
+    """
+    Launch one bcomp process for a collection of managed paths.
+    """
+    left_stage = tempfile.mkdtemp(
+        prefix=".mackup_bcomp_local_", dir=_stage_parent_for_root(local_root)
+    )
+    right_stage = tempfile.mkdtemp(
+        prefix=".mackup_bcomp_backup_", dir=_stage_parent_for_root(backup_root)
+    )
+
+    try:
+        seen_paths = set()
+        for row in rows:
+            relative_path = normalize_managed_path(row["Path"])
+            if relative_path in seen_paths:
+                continue
+            seen_paths.add(relative_path)
+
+            source_local = os.path.join(local_root, relative_path)
+            source_backup = os.path.join(backup_root, relative_path)
+            staged_local = os.path.join(left_stage, relative_path)
+            staged_backup = os.path.join(right_stage, relative_path)
+
+            if detect_path_type(source_local) != "missing":
+                materialize_editable_stage(source_local, staged_local)
+            if detect_path_type(source_backup) != "missing":
+                materialize_editable_stage(source_backup, staged_backup)
+
+        command = "bcomp {} {}".format(
+            _shell_quote(left_stage), _shell_quote(right_stage)
+        )
+        if verbose or dry_run:
+            print(command)
+        if not dry_run:
+            subprocess.run(["bash", "-lc", command], check=False)
+    finally:
+        shutil.rmtree(left_stage)
+        shutil.rmtree(right_stage)
+
+
+def _shell_quote(path: str) -> str:
+    """Return a shell-safe single-quoted path."""
+    return "'" + path.replace("'", "'\"'\"'") + "'"
+
+
+def _stage_parent_for_root(root: str) -> str:
+    """
+    Pick a writable parent on the same filesystem as a source root.
+    """
+    resolved_root = os.path.abspath(root)
+    if os.path.isdir(resolved_root):
+        return resolved_root
+    return os.path.dirname(resolved_root)
+
+
+def materialize_editable_stage(source: str, staged: str) -> None:
+    """
+    Materialize a source path into an editable bcomp staging tree.
+
+    Files are staged as hard links so edits propagate to the original file.
+    Directories are recreated as real directories and their files are staged as
+    hard links recursively.
+    """
+    source_type = detect_path_type(source)
+    if source_type == "file":
+        _hardlink_file(source, staged)
+        return
+
+    if source_type == "dir":
+        os.makedirs(staged, exist_ok=True)
+        for root, dirs, files in os.walk(source):
+            rel_root = os.path.relpath(root, source)
+            staged_root = staged if rel_root == "." else os.path.join(staged, rel_root)
+            os.makedirs(staged_root, exist_ok=True)
+            for directory in dirs:
+                os.makedirs(os.path.join(staged_root, directory), exist_ok=True)
+            for filename in files:
+                _hardlink_file(
+                    os.path.join(root, filename), os.path.join(staged_root, filename)
+                )
+        return
+
+    raise ValueError("Unsupported file for editable bcomp staging: {}".format(source))
+
+
+def _hardlink_file(source: str, staged: str) -> None:
+    """
+    Stage one file as a hard link.
+    """
+    parent = os.path.dirname(os.path.abspath(staged))
+    if not os.path.isdir(parent):
+        os.makedirs(parent)
+    os.link(source, staged)

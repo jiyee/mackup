@@ -1,5 +1,6 @@
 import unittest
 import os
+import shlex
 import tempfile
 import shutil
 from io import StringIO
@@ -397,6 +398,140 @@ class TestCLI(unittest.TestCase):
         output = self.run_cli("diff", "--status=different")
 
         self.assertEqual(output.strip(), "No managed configuration paths found for status: different.")
+
+    def test_bcomp_uses_configured_backup_root(self):
+        """Test that bcomp uses the configured Mackup folder by default."""
+        with patch("mackup.application.subprocess.run") as mock_run:
+            self.run_cli("bcomp", self.test_app_name)
+
+        expected_command = "bcomp '{}' '{}'".format(
+            self.test_file_path, os.path.join(self.mackup_folder, self.test_file_name)
+        )
+        mock_run.assert_called_once_with(["bash", "-lc", expected_command], check=False)
+
+    def test_bcomp_uses_override_backup_root(self):
+        """Test that bcomp can use an explicit backup root override."""
+        override_root = "~/CustomMackup"
+        expanded_override = os.path.expanduser(override_root)
+
+        with patch("mackup.application.subprocess.run") as mock_run:
+            self.run_cli("bcomp", self.test_app_name, f"--backup-root={override_root}")
+
+        expected_command = "bcomp '{}' '{}'".format(
+            self.test_file_path, os.path.join(expanded_override, self.test_file_name)
+        )
+        mock_run.assert_called_once_with(["bash", "-lc", expected_command], check=False)
+
+    def test_bcomp_all_uses_only_different_paths(self):
+        """Test that batch bcomp stages only rows matching the default different status."""
+        second_app_name = "second-app"
+        second_file_name = ".secondrc"
+        second_file_path = os.path.join(self.test_home, second_file_name)
+        second_app_config = os.path.join(self.custom_apps_dir, "second-app.cfg")
+
+        with open(self.config_path, "a") as f:
+            f.write(f"{second_app_name}\n")
+
+        with open(second_file_path, "w") as f:
+            f.write("second=value\n")
+
+        with open(second_app_config, "w") as f:
+            f.write("[application]\n")
+            f.write(f"name = {second_app_name}\n")
+            f.write("\n")
+            f.write("[configuration_files]\n")
+            f.write(f"{second_file_name}\n")
+
+        self.run_cli("backup")
+
+        with open(self.test_file_path, "w") as f:
+            f.write("test_config=modified\n")
+
+        def assert_bcomp_tree(args, check):
+            self.assertFalse(check)
+            self.assertEqual(args[0:2], ["bash", "-lc"])
+            command_parts = shlex.split(args[2])
+            self.assertEqual(command_parts[0], "bcomp")
+            self.assertEqual(len(command_parts), 3)
+            local_root, backup_root = command_parts[1], command_parts[2]
+
+            staged_local = os.path.join(local_root, self.test_file_name)
+            staged_backup = os.path.join(backup_root, self.test_file_name)
+            self.assertTrue(os.path.exists(staged_local))
+            self.assertTrue(os.path.exists(staged_backup))
+            self.assertFalse(os.path.islink(staged_local))
+            self.assertFalse(os.path.islink(staged_backup))
+            self.assertTrue(os.path.samefile(staged_local, self.test_file_path))
+            self.assertTrue(
+                os.path.samefile(
+                    staged_backup, os.path.join(self.mackup_folder, self.test_file_name)
+                )
+            )
+            self.assertFalse(os.path.exists(os.path.join(local_root, second_file_name)))
+            self.assertFalse(os.path.exists(os.path.join(backup_root, second_file_name)))
+
+        with patch("mackup.utils.subprocess.run", side_effect=assert_bcomp_tree) as mock_run:
+            self.run_cli("bcomp", "--all")
+
+        mock_run.assert_called_once()
+
+    def test_bcomp_all_reports_when_no_different_paths_exist(self):
+        """Test that batch bcomp reports no matches and does not launch bcomp."""
+        self.run_cli("backup")
+
+        with patch("mackup.utils.subprocess.run") as mock_run:
+            output = self.run_cli("bcomp", "--all")
+
+        mock_run.assert_not_called()
+        self.assertEqual(output.strip(), "No managed configuration paths found for status: different.")
+
+    def test_bcomp_all_handles_directory_paths_with_trailing_slash(self):
+        """Test that batch bcomp normalizes trailing slashes on directory entries."""
+        test_folder_name = ".test_folder/"
+        normalized_folder_name = ".test_folder"
+        test_folder_path = os.path.join(self.test_home, normalized_folder_name)
+        os.makedirs(test_folder_path, exist_ok=True)
+
+        test_file_in_folder = os.path.join(test_folder_path, "config.txt")
+        with open(test_file_in_folder, "w") as f:
+            f.write("folder_config=value\n")
+
+        with open(self.custom_app_config, "w") as f:
+            f.write("[application]\n")
+            f.write(f"name = {self.test_app_name}\n")
+            f.write("\n")
+            f.write("[configuration_files]\n")
+            f.write(f"{test_folder_name}\n")
+
+        self.run_cli("backup")
+
+        with open(test_file_in_folder, "w") as f:
+            f.write("folder_config=modified\n")
+
+        def assert_bcomp_tree(args, check):
+            self.assertFalse(check)
+            command_parts = shlex.split(args[2])
+            local_root, backup_root = command_parts[1], command_parts[2]
+            staged_local_dir = os.path.join(local_root, normalized_folder_name)
+            staged_backup_dir = os.path.join(backup_root, normalized_folder_name)
+            self.assertTrue(os.path.isdir(staged_local_dir))
+            self.assertTrue(os.path.isdir(staged_backup_dir))
+            self.assertFalse(os.path.islink(staged_local_dir))
+            self.assertFalse(os.path.islink(staged_backup_dir))
+            self.assertTrue(
+                os.path.samefile(
+                    os.path.join(staged_local_dir, "config.txt"), test_file_in_folder
+                )
+            )
+            self.assertTrue(
+                os.path.samefile(
+                    os.path.join(staged_backup_dir, "config.txt"),
+                    os.path.join(self.mackup_folder, normalized_folder_name, "config.txt"),
+                )
+            )
+
+        with patch("mackup.utils.subprocess.run", side_effect=assert_bcomp_tree):
+            self.run_cli("bcomp", "--all")
 
 
 if __name__ == "__main__":

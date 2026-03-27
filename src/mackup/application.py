@@ -6,7 +6,8 @@ Mackup. Name, files, ...
 """
 
 import os
-from typing import Dict, List, Set, Tuple
+import subprocess
+from typing import Dict, List, Optional, Set, Tuple
 
 from .mackup import Mackup
 from . import utils
@@ -41,12 +42,15 @@ class ApplicationProfile:
         Returns:
             home_filepath, mackup_filepath (str, str)
         """
+        normalized_filename = utils.normalize_managed_path(filename)
         return (
-            os.path.join(os.environ["HOME"], filename),
-            os.path.join(self.mackup.mackup_folder, filename),
+            os.path.join(os.environ["HOME"], normalized_filename),
+            os.path.join(self.mackup.mackup_folder, normalized_filename),
         )
 
-    def get_diff_rows(self, app_name: str) -> List[Dict[str, str]]:
+    def get_diff_rows(
+        self, app_name: str, backup_root: Optional[str] = None
+    ) -> List[Dict[str, str]]:
         """
         Build diff rows for each managed path in the application.
 
@@ -54,8 +58,13 @@ class ApplicationProfile:
             list of dict
         """
         rows: List[Dict[str, str]] = []
+        resolved_backup_root = utils.resolve_backup_root(
+            self.mackup.mackup_folder, backup_root
+        )
         for filename in sorted(self.files):
-            (home_filepath, mackup_filepath) = self.getFilepaths(filename)
+            normalized_filename = utils.normalize_managed_path(filename)
+            home_filepath = os.path.join(os.environ["HOME"], normalized_filename)
+            mackup_filepath = os.path.join(resolved_backup_root, normalized_filename)
             rows.append(
                 {
                     "Application": app_name,
@@ -76,6 +85,31 @@ class ApplicationProfile:
             )
 
         return rows
+
+    def bcomp(self, backup_root: Optional[str] = None) -> None:
+        """
+        Launch bcomp for each managed path in the application.
+
+        Args:
+            backup_root (str or None): Optional backup root override.
+        """
+        resolved_backup_root = utils.resolve_backup_root(
+            self.mackup.mackup_folder, backup_root
+        )
+
+        for filename in sorted(self.files):
+            normalized_filename = utils.normalize_managed_path(filename)
+            home_filepath = os.path.join(os.environ["HOME"], normalized_filename)
+            backup_filepath = os.path.join(resolved_backup_root, normalized_filename)
+            command = "bcomp {} {}".format(
+                utils._shell_quote(home_filepath), utils._shell_quote(backup_filepath)
+            )
+
+            if self.verbose or self.dry_run:
+                print(command)
+
+            if not self.dry_run:
+                subprocess.run(["bash", "-lc", command], check=False)
 
     def copy_files_to_mackup_folder(self) -> None:
         """

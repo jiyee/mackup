@@ -58,6 +58,7 @@ Entry point for the application. Parses command-line arguments using
 - Argument parsing and validation
 - Help text display
 - Operation dispatch
+- Ad hoc tooling commands like `diff` and `bcomp`
 
 ### 2. Configuration Manager (`config.py`)
 
@@ -110,6 +111,8 @@ Handles the operations (backup, restore, link) for individual applications.
 - Symlink creation and management
 - XDG directory handling
 - Conflict detection
+- External comparison helpers such as `bcomp`
+- Batch staging for grouped `bcomp --all` sessions
 
 ### 5. Core Engine (`mackup.py`)
 
