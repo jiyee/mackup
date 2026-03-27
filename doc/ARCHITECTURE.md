@@ -25,6 +25,8 @@ Copy mode is used for backing up and restoring files:
   to the Mackup folder
 - **`mackup restore`**: Copies configuration files from the Mackup folder
   back to your home directory
+- **`mackup diff`**: Compares local configuration files against the Mackup
+  folder and prints a table of differences
 
 This is a one-time operation used when setting up a new machine or creating
 an initial backup.
@@ -175,6 +177,27 @@ application.py for each app:
     - Preserves permissions and timestamps
     ↓
 Config files now in home directory
+```
+
+### Diff Flow
+
+```text
+User runs: mackup diff
+    ↓
+main.py parses command
+    ↓
+config.py loads .mackup.cfg
+    ↓
+appsdb.py loads application definitions
+    ↓
+mackup.py resolves the configured backup root
+    ↓
+application.py for each app:
+    - Resolves the local and backup path for each managed entry
+    - Compares files or directory trees
+    - Produces a normalized status row
+    ↓
+utils.py renders the rows as an ASCII table
 ```
 
 ### Link Install Flow (Legacy)

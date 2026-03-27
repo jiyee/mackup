@@ -8,6 +8,7 @@ Usage:
   mackup [options] show <application>
   mackup [options] backup [--] [<application> ...]
   mackup [options] restore [--] [<application> ...]
+  mackup [options] diff [--status=<status>] [--] [<application> ...]
   mackup [options] link install
   mackup [options] link
   mackup [options] link uninstall
@@ -21,6 +22,7 @@ Options:
   -n --dry-run              Show steps without executing.
   -v --verbose              Show additional details.
   -c --config-file=<path>   Specify custom config file path.
+  --status=<status>         Filter `diff` rows by status.
   --version                 Show version.
 
 Modes of action:
@@ -28,6 +30,7 @@ Modes of action:
  - mackup show: display the details for a supported application.
  - mackup backup: copy local config files in the configured remote folder.
  - mackup restore: copy config files from the configured remote folder locally.
+ - mackup diff: compare local config files with the configured remote folder.
  - mackup link install: moves local config files in remote folder, and links them.
  - mackup link: links local config files from the remote folder.
  - mackup link uninstall: removes the links and copy config files from the remote folder locally.
@@ -47,7 +50,7 @@ from .constants import MACKUP_APP_NAME, VERSION
 from .mackup import Mackup
 from . import utils
 import sys
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 
 
 class ColorFormatCodes:
@@ -151,6 +154,40 @@ def main() -> None:
             app = ApplicationProfile(mckp, app_db.get_files(app_name), dry_run, verbose)
             printAppHeader(app_name)
             app.copy_files_from_mackup_folder()
+
+    # mackup diff
+    elif args["diff"]:
+        mckp.check_for_usable_environment()
+
+        app_names = sorted(mckp.get_apps_to_backup())
+        if args["<application>"]:
+            app_names = sorted(set(args["<application>"]) & set(app_names))
+        status_filter: Optional[str] = args.get("--status")
+
+        rows: List[Dict[str, str]] = []
+        for app_name in app_names:
+            app = ApplicationProfile(mckp, app_db.get_files(app_name), dry_run, verbose)
+            rows.extend(app.get_diff_rows(app_name))
+
+        if status_filter:
+            rows = [row for row in rows if row["Status"] == status_filter]
+
+        if rows:
+            print(
+                utils.render_table(
+                    ["Application", "Path", "Type", "Local", "Backup", "Status"],
+                    rows,
+                )
+            )
+        else:
+            if status_filter:
+                print(
+                    "No managed configuration paths found for status: {}.".format(
+                        status_filter
+                    )
+                )
+            else:
+                print("No managed configuration paths found.")
 
     # mackup link install
     elif args["link"] and args["install"]:

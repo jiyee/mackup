@@ -2,6 +2,7 @@ import unittest
 import os
 import tempfile
 import shutil
+from io import StringIO
 from unittest.mock import patch
 from mackup.main import main
 from mackup import utils
@@ -85,14 +86,20 @@ class TestCLI(unittest.TestCase):
         utils.FORCE_YES = False
         utils.CAN_RUN_AS_ROOT = False
 
+    def run_cli(self, *args):
+        """Run the CLI and capture stdout."""
+        with patch("sys.argv", ["mackup", *args]):
+            with patch("sys.stdout", new_callable=StringIO) as captured_output:
+                main()
+                return captured_output.getvalue()
+
     def test_backup_creates_mackup_folder(self):
         """Test that mackup backup creates the Mackup folder if it doesn't exist."""
         # Ensure Mackup folder doesn't exist
         self.assertFalse(os.path.exists(self.mackup_folder))
 
         # Mock sys.argv to simulate 'mackup backup'
-        with patch("sys.argv", ["mackup", "backup"]):
-            main()
+        self.run_cli("backup")
 
         # Check that Mackup folder was created
         self.assertTrue(os.path.exists(self.mackup_folder))
@@ -103,8 +110,7 @@ class TestCLI(unittest.TestCase):
         self.assertTrue(os.path.exists(self.test_file_path))
 
         # Run backup
-        with patch("sys.argv", ["mackup", "backup"]):
-            main()
+        self.run_cli("backup")
 
         # Check that file was copied to Mackup folder
         backed_up_file = os.path.join(self.mackup_folder, self.test_file_name)
@@ -121,8 +127,7 @@ class TestCLI(unittest.TestCase):
     def test_restore_copies_file_back(self):
         """Test that mackup restore successfully copies a file back from backup."""
         # First, create a backup
-        with patch("sys.argv", ["mackup", "backup"]):
-            main()
+        self.run_cli("backup")
 
         # Verify backup exists
         backed_up_file = os.path.join(self.mackup_folder, self.test_file_name)
@@ -133,8 +138,7 @@ class TestCLI(unittest.TestCase):
         self.assertFalse(os.path.exists(self.test_file_path))
 
         # Run restore
-        with patch("sys.argv", ["mackup", "restore"]):
-            main()
+        self.run_cli("restore")
 
         # Check that file was restored
         self.assertTrue(os.path.exists(self.test_file_path))
@@ -155,8 +159,7 @@ class TestCLI(unittest.TestCase):
             self.assertEqual(f.read(), original_content)
 
         # Step 1: Backup
-        with patch("sys.argv", ["mackup", "backup"]):
-            main()
+        self.run_cli("backup")
 
         # Verify backup was created
         backed_up_file = os.path.join(self.mackup_folder, self.test_file_name)
@@ -172,8 +175,7 @@ class TestCLI(unittest.TestCase):
             self.assertEqual(f.read(), modified_content)
 
         # Step 3: Restore (should replace modified file with backup)
-        with patch("sys.argv", ["mackup", "restore"]):
-            main()
+        self.run_cli("restore")
 
         # Verify file was restored to original content
         with open(self.test_file_path, "r") as f:
@@ -185,8 +187,7 @@ class TestCLI(unittest.TestCase):
         os.chmod(self.test_file_path, 0o600)
 
         # Run backup
-        with patch("sys.argv", ["mackup", "backup"]):
-            main()
+        self.run_cli("backup")
 
         # Check backup file permissions
         backed_up_file = os.path.join(self.mackup_folder, self.test_file_name)
@@ -205,13 +206,12 @@ class TestCLI(unittest.TestCase):
         os.makedirs(self.mackup_folder, exist_ok=True)
 
         # Run restore (should not crash even though no backup exists)
-        with patch("sys.argv", ["mackup", "restore"]):
-            try:
-                main()
-                # If no exception is raised, the test passes
-                # (restore should gracefully handle missing files)
-            except Exception as e:
-                self.fail(f"Restore raised an exception with missing backup: {e}")
+        try:
+            self.run_cli("restore")
+            # If no exception is raised, the test passes
+            # (restore should gracefully handle missing files)
+        except Exception as e:
+            self.fail(f"Restore raised an exception with missing backup: {e}")
 
     def test_backup_with_folder(self):
         """Test that mackup backup works with folders, not just files."""
@@ -234,8 +234,7 @@ class TestCLI(unittest.TestCase):
             f.write(f"{test_folder_name}\n")
 
         # Run backup
-        with patch("sys.argv", ["mackup", "backup"]):
-            main()
+        self.run_cli("backup")
 
         # Check that folder was copied
         backed_up_folder = os.path.join(self.mackup_folder, test_folder_name)
@@ -271,16 +270,14 @@ class TestCLI(unittest.TestCase):
             f.write(f"{test_folder_name}\n")
 
         # Run backup first
-        with patch("sys.argv", ["mackup", "backup"]):
-            main()
+        self.run_cli("backup")
 
         # Delete the folder
         shutil.rmtree(test_folder_path)
         self.assertFalse(os.path.exists(test_folder_path))
 
         # Run restore
-        with patch("sys.argv", ["mackup", "restore"]):
-            main()
+        self.run_cli("restore")
 
         # Check that folder was restored
         self.assertTrue(os.path.exists(test_folder_path))
@@ -292,6 +289,114 @@ class TestCLI(unittest.TestCase):
         # Verify content
         with open(test_file_in_folder, "r") as f:
             self.assertEqual(f.read(), "folder_config=value\n")
+
+    def test_diff_reports_identical_file(self):
+        """Test that diff reports identical files when local and backup match."""
+        self.run_cli("backup")
+
+        output = self.run_cli("diff")
+
+        self.assertIn("Application", output)
+        self.assertIn("Path", output)
+        self.assertIn("Status", output)
+        self.assertIn(self.test_app_name, output)
+        self.assertIn(self.test_file_name, output)
+        self.assertIn("identical", output)
+
+    def test_diff_reports_modified_local_file(self):
+        """Test that diff reports different when local file content changes."""
+        self.run_cli("backup")
+
+        with open(self.test_file_path, "w") as f:
+            f.write("test_config=modified\n")
+
+        output = self.run_cli("diff")
+
+        self.assertIn(self.test_file_name, output)
+        self.assertIn("different", output)
+
+    def test_diff_reports_missing_local_file(self):
+        """Test that diff reports missing_local when the local file is gone."""
+        self.run_cli("backup")
+        os.remove(self.test_file_path)
+
+        output = self.run_cli("diff")
+
+        self.assertIn(self.test_file_name, output)
+        self.assertIn("missing_local", output)
+
+    def test_diff_reports_missing_backup_file(self):
+        """Test that diff reports missing_backup when backup file is gone."""
+        self.run_cli("backup")
+        os.remove(os.path.join(self.mackup_folder, self.test_file_name))
+
+        output = self.run_cli("diff")
+
+        self.assertIn(self.test_file_name, output)
+        self.assertIn("missing_backup", output)
+
+    def test_diff_reports_directory_differences(self):
+        """Test that diff compares directories and reports differences."""
+        test_folder_name = ".test_folder"
+        test_folder_path = os.path.join(self.test_home, test_folder_name)
+        os.makedirs(test_folder_path, exist_ok=True)
+
+        test_file_in_folder = os.path.join(test_folder_path, "config.txt")
+        with open(test_file_in_folder, "w") as f:
+            f.write("folder_config=value\n")
+
+        with open(self.custom_app_config, "w") as f:
+            f.write("[application]\n")
+            f.write(f"name = {self.test_app_name}\n")
+            f.write("\n")
+            f.write("[configuration_files]\n")
+            f.write(f"{self.test_file_name}\n")
+            f.write(f"{test_folder_name}\n")
+
+        self.run_cli("backup")
+
+        with open(test_file_in_folder, "w") as f:
+            f.write("folder_config=modified\n")
+
+        output = self.run_cli("diff")
+
+        self.assertIn(test_folder_name, output)
+        self.assertIn("different", output)
+
+    def test_diff_filters_rows_by_status(self):
+        """Test that diff can filter output to a single status."""
+        self.run_cli("backup")
+
+        with open(self.test_file_path, "w") as f:
+            f.write("test_config=modified\n")
+
+        extra_file_name = ".extra"
+        extra_file_path = os.path.join(self.test_home, extra_file_name)
+        with open(extra_file_path, "w") as f:
+            f.write("extra=value\n")
+
+        with open(self.custom_app_config, "w") as f:
+            f.write("[application]\n")
+            f.write(f"name = {self.test_app_name}\n")
+            f.write("\n")
+            f.write("[configuration_files]\n")
+            f.write(f"{self.test_file_name}\n")
+            f.write(f"{extra_file_name}\n")
+
+        output = self.run_cli("diff", "--status=different")
+
+        self.assertIn(self.test_file_name, output)
+        self.assertIn("different", output)
+        self.assertNotIn(extra_file_name, output)
+        self.assertNotIn("missing_backup", output)
+
+    def test_diff_reports_when_status_filter_has_no_matches(self):
+        """Test that diff reports empty results when no rows match a status filter."""
+        self.run_cli("backup")
+
+        output = self.run_cli("diff", "--status=different")
+
+        self.assertEqual(output.strip(), "No managed configuration paths found for status: different.")
 
 
 if __name__ == "__main__":

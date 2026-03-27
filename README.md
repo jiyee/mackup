@@ -79,6 +79,11 @@ Back up your application files. Copy your local config files into the Mackup fol
 Restore your application settings on a newly installed workstation.
 Copy config files from the Mackup folder to your home folder.
 
+`mackup diff`
+
+Compare your local config files with the Mackup folder and print the
+differences as a table.
+
 `mackup link install`
 
 Move your local config files into the Mackup folder,
@@ -124,6 +129,7 @@ It is covered by the 2 commands:
 
 - `mackup backup`
 - `mackup restore`
+- `mackup diff`
 
 ### Link mode
 

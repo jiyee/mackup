@@ -1,6 +1,7 @@
 """System static utilities being used by the modules."""
 
 import base64
+import filecmp
 import os
 import platform
 import shutil
@@ -8,7 +9,7 @@ import stat
 import subprocess
 import sys
 import sqlite3
-from typing import NoReturn, Optional
+from typing import Dict, List, NoReturn, Optional, Sequence
 
 from . import constants
 
@@ -372,3 +373,138 @@ def can_file_be_synced_on_current_platform(path: str) -> bool:
             can_be_synced = False
 
     return can_be_synced
+
+
+def detect_path_type(path: str) -> str:
+    """
+    Detect the normalized type for a path.
+
+    Returns:
+        str: file, dir, link, or missing
+    """
+    if os.path.isfile(path):
+        return "file"
+    if os.path.isdir(path):
+        return "dir"
+    if os.path.islink(path):
+        return "link"
+    return "missing"
+
+
+def files_are_identical(left: str, right: str) -> bool:
+    """
+    Compare two files by content.
+
+    Returns:
+        bool: True when file contents match
+    """
+    return filecmp.cmp(left, right, shallow=False)
+
+
+def directories_are_identical(left: str, right: str) -> bool:
+    """
+    Recursively compare two directories by contents.
+
+    Returns:
+        bool: True when directory trees match
+    """
+    comparison = filecmp.dircmp(left, right)
+    if comparison.left_only or comparison.right_only or comparison.funny_files:
+        return False
+
+    (_, mismatches, errors) = filecmp.cmpfiles(
+        left, right, comparison.common_files, shallow=False
+    )
+    if mismatches or errors:
+        return False
+
+    for dirname in comparison.common_dirs:
+        if not directories_are_identical(
+            os.path.join(left, dirname), os.path.join(right, dirname)
+        ):
+            return False
+
+    return True
+
+
+def get_diff_status(local_path: str, backup_path: str) -> str:
+    """
+    Derive a stable diff status for one managed path.
+
+    Returns:
+        str
+    """
+    local_type = detect_path_type(local_path)
+    backup_type = detect_path_type(backup_path)
+
+    if local_type == "missing" and backup_type == "missing":
+        return "both_missing"
+    if local_type == "missing":
+        return "missing_local"
+    if backup_type == "missing":
+        return "missing_backup"
+
+    if os.path.islink(local_path) and os.path.exists(backup_path):
+        try:
+            if os.path.samefile(local_path, backup_path):
+                return "linked_to_backup"
+        except FileNotFoundError:
+            pass
+
+    if local_type != backup_type:
+        return "different"
+    if local_type == "file":
+        return "identical" if files_are_identical(local_path, backup_path) else "different"
+    if local_type == "dir":
+        return (
+            "identical"
+            if directories_are_identical(local_path, backup_path)
+            else "different"
+        )
+
+    return "different"
+
+
+def get_diff_display_type(local_path: str, backup_path: str) -> str:
+    """
+    Determine the type to show in diff output.
+
+    Returns:
+        str
+    """
+    local_type = detect_path_type(local_path)
+    if local_type != "missing":
+        return local_type
+
+    backup_type = detect_path_type(backup_path)
+    if backup_type != "missing":
+        return backup_type
+
+    return "missing"
+
+
+def render_table(headers: Sequence[str], rows: Sequence[Dict[str, str]]) -> str:
+    """
+    Render a simple ASCII table.
+
+    Returns:
+        str
+    """
+    string_rows: List[Dict[str, str]] = [
+        {header: str(row.get(header, "")) for header in headers} for row in rows
+    ]
+    widths = {
+        header: max(
+            len(header), *(len(row[header]) for row in string_rows)
+        )
+        for header in headers
+    }
+
+    def render_row(row: Dict[str, str]) -> str:
+        return " | ".join(row[header].ljust(widths[header]) for header in headers)
+
+    separator = "-+-".join("-" * widths[header] for header in headers)
+    header_row = render_row({header: header for header in headers})
+    body = [render_row(row) for row in string_rows]
+
+    return "\n".join([header_row, separator, *body])

@@ -6,7 +6,7 @@ Mackup. Name, files, ...
 """
 
 import os
-from typing import List, Set, Tuple
+from typing import Dict, List, Set, Tuple
 
 from .mackup import Mackup
 from . import utils
@@ -45,6 +45,37 @@ class ApplicationProfile:
             os.path.join(os.environ["HOME"], filename),
             os.path.join(self.mackup.mackup_folder, filename),
         )
+
+    def get_diff_rows(self, app_name: str) -> List[Dict[str, str]]:
+        """
+        Build diff rows for each managed path in the application.
+
+        Returns:
+            list of dict
+        """
+        rows: List[Dict[str, str]] = []
+        for filename in sorted(self.files):
+            (home_filepath, mackup_filepath) = self.getFilepaths(filename)
+            rows.append(
+                {
+                    "Application": app_name,
+                    "Path": filename,
+                    "Type": utils.get_diff_display_type(home_filepath, mackup_filepath),
+                    "Local": (
+                        "yes"
+                        if utils.detect_path_type(home_filepath) != "missing"
+                        else "no"
+                    ),
+                    "Backup": (
+                        "yes"
+                        if utils.detect_path_type(mackup_filepath) != "missing"
+                        else "no"
+                    ),
+                    "Status": utils.get_diff_status(home_filepath, mackup_filepath),
+                }
+            )
+
+        return rows
 
     def copy_files_to_mackup_folder(self) -> None:
         """
