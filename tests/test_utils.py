@@ -32,6 +32,20 @@ class TestMackup(unittest.TestCase):
         utils.input = custom_input
         assert not utils.confirm("Answer No to this question")
 
+    def test_confirm_enter_defaults_yes(self):
+        # Override the input used in utils
+        call_count = 0
+
+        def custom_input(_):
+            nonlocal call_count
+            call_count += 1
+            if call_count > 1:
+                raise AssertionError("confirm() should accept Enter on the first prompt")
+            return ""
+
+        utils.input = custom_input
+        assert utils.confirm("Press Enter to confirm")
+
     def test_confirm_typo(self):
         # Override the input used in utils
         def custom_input(_):

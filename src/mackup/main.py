@@ -11,6 +11,7 @@ Usage:
   mackup [options] backup [--] [<application> ...]
   mackup [options] restore [--] [<application> ...]
   mackup [options] diff [--status=<status>] [--] [<application> ...]
+  mackup [options] rclone
   mackup [options] link install
   mackup [options] link
   mackup [options] link uninstall
@@ -37,6 +38,7 @@ Modes of action:
  - mackup restore: copy config files from the configured remote folder locally.
  - mackup diff: compare local config files with the configured remote folder.
    Defaults to rows with `different` status.
+ - mackup rclone: run `rclone bisync ~/Mackup oss:mackup`.
  - mackup link install: moves local config files in remote folder, and links them.
  - mackup link: links local config files from the remote folder.
  - mackup link uninstall: removes the links and copy config files from the remote folder locally.
@@ -50,6 +52,7 @@ See https://github.com/lra/mackup/tree/master/doc for more information.
 """
 
 import os
+import subprocess
 from docopt import docopt
 from .appsdb import ApplicationsDatabase
 from .application import ApplicationProfile
@@ -248,6 +251,13 @@ def main() -> None:
                     status_filter
                 )
             )
+
+    # mackup rclone
+    elif args["rclone"]:
+        subprocess.run(
+            ["bash", "-lc", "rclone bisync ~/Mackup oss:mackup"],
+            check=False,
+        )
 
     # mackup link install
     elif args["link"] and args["install"]:

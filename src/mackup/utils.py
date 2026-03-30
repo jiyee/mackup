@@ -41,9 +41,9 @@ def confirm(question: str) -> bool:
         return False
 
     while True:
-        answer: str = input(question + " <Yes|No> ").lower()
+        answer: str = input(question + " <Enter|Yes|No> ").lower()
 
-        if answer == "yes" or answer == "y":
+        if answer == "" or answer == "yes" or answer == "y":
             confirmed: bool = True
             break
         if answer == "no" or answer == "n":

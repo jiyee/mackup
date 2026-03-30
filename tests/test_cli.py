@@ -450,6 +450,15 @@ class TestCLI(unittest.TestCase):
         )
         mock_run.assert_called_once_with(["bash", "-lc", expected_command], check=False)
 
+    def test_rclone_runs_fixed_bisync_command_even_in_dry_run_mode(self):
+        """Test that rclone always runs the fixed bisync command."""
+        with patch("subprocess.run") as mock_run:
+            self.run_cli("--dry-run", "rclone")
+
+        mock_run.assert_called_once_with(
+            ["bash", "-lc", "rclone bisync ~/Mackup oss:mackup"], check=False
+        )
+
     def test_bcomp_all_uses_only_different_paths(self):
         """Test that batch bcomp stages only rows matching the default different status."""
         second_app_name = "second-app"
